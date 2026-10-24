@@ -6,7 +6,7 @@ import pytest
 import update_d2dx as u
 from lutris import REPO
 
-INSTALLER = REPO / "diablo-ii-lod-original-cds.yml"
+INSTALLER = REPO / "diablo-ii-original-cds" / "installer.yml"
 REPO_NAME = "jackrayner/d2dx"
 
 

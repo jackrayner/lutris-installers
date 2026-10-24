@@ -76,7 +76,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add diablo-ii-lod-original-cds.yml
+          git add diablo-ii-original-cds/installer.yml
           git commit -m "chore(d2dx): update to $TAG" -m "Bump the pinned D2DX release from $OLD_TAG to $TAG."
           git push origin "$branch"
           gh pr create --base main --head "$branch" \

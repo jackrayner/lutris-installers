@@ -19,7 +19,7 @@ from lutris import (
 )
 
 INSTALLERS = installer_paths()
-IDS = [p.name for p in INSTALLERS]
+IDS = [p.parent.name for p in INSTALLERS]
 
 REQUIRED_TOP_LEVEL = ["name", "game_slug", "version", "slug", "runner", "script"]
 

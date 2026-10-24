@@ -5,7 +5,7 @@ import re
 import pytest
 from lutris import REPO, load, steps
 
-SCRIPT = REPO / "diablo-ii-lod-original-cds.yml"
+SCRIPT = REPO / "diablo-ii-original-cds" / "installer.yml"
 
 # Wine hands D: onwards to CD drives it detects (e.g. ISOs mounted on the host)
 # and Proton resets S: (game library) and T: (Steam) on every launch

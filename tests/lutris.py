@@ -29,7 +29,7 @@ VAR_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_-]*)\}?")
 
 
 def installer_paths():
-    return sorted(REPO.glob("*.yml"))
+    return sorted(REPO.glob("*/installer.yml"))
 
 
 def load(path):
