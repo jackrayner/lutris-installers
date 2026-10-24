@@ -1,0 +1,166 @@
+name: "Diablo II: Lord of Destruction"
+game_slug: diablo-ii-lord-of-destruction
+version: Original 4 CD (ISO)
+slug: diablo-ii-lord-of-destruction-original-4-cd-iso
+runner: wine
+description: >-
+  Installs Diablo II and Lord of Destruction from ISO images of the original
+  retail CDs (Install, Play Disc, Cinematics, Expansion), then patches to
+  1.13c or 1.14d. Based on the "Battle Chest 4 CD" Lutris script.
+notes: >-
+  The original Diablo II CDs are three discs (Install, Play Disc, Cinematics)
+  rather than the Battle Chest's "installer tome" discs. This script extracts
+  the ISO images with 7z (no mounting needed) and gives each disc its own
+  labelled CD-ROM drive in Wine (R: Install, P: Play Disc, Q: Cinematics,
+  U: Expansion), so the installers find every disc without a swap. In each
+  installer choose the default install folder and a Full installation; exit
+  the installer when it finishes to continue.
+
+script:
+  require-binaries: sha256sum, 7z
+
+  variables:
+    gamepath: drive_c/Program Files (x86)/Diablo II
+    patch113c_sha256: 2301158bb44062094e8dbfbe40dde6f20f870fc88190975c34379280e7aef781
+    patch114d_sha256: 5ee5b6f09c338324db14ea3ec03a4b8a9b36e4eea249bb12f1fb592558d6434d
+
+  files:
+  - install_iso: "N/A:Select the Diablo II INSTALL disc ISO"
+  - playdisc_iso: "N/A:Select the Diablo II PLAYDISC ISO"
+  - cinematics_iso: "N/A:Select the Diablo II CINEMATICS ISO"
+  - expansion_iso: "N/A:Select the Lord of Destruction EXPANSION ISO"
+  - patch113c: http://ftp.blizzard.com/pub/diablo2exp/patches/PC/LODPatch_113c.exe
+  - patch114d: http://ftp.blizzard.com/pub/diablo2exp/patches/PC/LODPatch_114d.exe
+
+  game:
+    arch: win64
+    exe: $GAMEDIR/$gamepath/Diablo II.exe
+    prefix: $GAMEDIR
+
+  installer:
+  - write_file:
+      file: $CACHE/checkhash.sh
+      content: |
+        #!/bin/bash
+        file="$1"; hash="$2"; echo "[INFO] Verifying $(basename "$file") sha256 checksum..."; if [ $(sha256sum "$file" | cut -c 1-64) = "$hash" ]; then echo "[INFO] ...checksum OK!"; else echo "[ERROR] ...checksum FAILED!"; exit 1; fi
+  - execute:
+      file: chmod
+      args: +x $CACHE/checkhash.sh
+  - execute:
+      file: $CACHE/checkhash.sh
+      args: patch113c $patch113c_sha256
+  - execute:
+      file: cp
+      args: -n patch113c $CACHE/patch113c/LODPatch_113c.exe
+  - execute:
+      file: $CACHE/checkhash.sh
+      args: patch114d $patch114d_sha256
+  - execute:
+      file: cp
+      args: -n patch114d $CACHE/patch114d/LODPatch_114d.exe
+
+  # Extract the PC (ISO 9660) side of each hybrid CD into its own folder.
+  - execute:
+      command: >-
+        set -e;
+        7z x -tiso -y -o"$CACHE/cd-install" "$install_iso";
+        7z x -tiso -y -o"$CACHE/cd-playdisc" "$playdisc_iso";
+        7z x -tiso -y -o"$CACHE/cd-cinematics" "$cinematics_iso";
+        7z x -tiso -y -o"$CACHE/cd-expansion" "$expansion_iso"
+
+  - task:
+      name: create_prefix
+      arch: win64
+      prefix: $GAMEDIR
+      install_gecko: false
+      install_mono: false
+
+  # The installers insist on a CD-ROM drive with the right volume label, so
+  # give each disc its own drive: R: Install, P: Play Disc, Q: Cinematics,
+  # U: Expansion. Avoid D: onwards (Wine hands those to detected CDs) and
+  # S:/T: (Proton resets them on every launch). Wine takes the label from
+  # .windows-label in the drive root and the drive type from Wine\Drives.
+  - execute:
+      command: >-
+        set -e;
+        cd "$GAMEDIR/dosdevices";
+        ln -sfn "$CACHE/cd-install" r:; echo INSTALL > "$CACHE/cd-install/.windows-label";
+        ln -sfn "$CACHE/cd-playdisc" p:; echo PLAYDISC > "$CACHE/cd-playdisc/.windows-label";
+        ln -sfn "$CACHE/cd-cinematics" q:; echo CINEMATICS > "$CACHE/cd-cinematics/.windows-label";
+        ln -sfn "$CACHE/cd-expansion" u:; echo Expansion > "$CACHE/cd-expansion/.windows-label"
+  - task:
+      name: set_regedit
+      arch: win64
+      prefix: $GAMEDIR
+      path: HKEY_LOCAL_MACHINE\Software\Wine\Drives
+      key: "r:"
+      value: cdrom
+  - task:
+      name: set_regedit
+      arch: win64
+      prefix: $GAMEDIR
+      path: HKEY_LOCAL_MACHINE\Software\Wine\Drives
+      key: "p:"
+      value: cdrom
+  - task:
+      name: set_regedit
+      arch: win64
+      prefix: $GAMEDIR
+      path: HKEY_LOCAL_MACHINE\Software\Wine\Drives
+      key: "q:"
+      value: cdrom
+  - task:
+      name: set_regedit
+      arch: win64
+      prefix: $GAMEDIR
+      path: HKEY_LOCAL_MACHINE\Software\Wine\Drives
+      key: "u:"
+      value: cdrom
+  # Restart Wine so the mount manager picks up the new drives
+  - task:
+      name: winekill
+      arch: win64
+      prefix: $GAMEDIR
+
+  - task:
+      name: wineexec
+      arch: win64
+      prefix: $GAMEDIR
+      executable: "$GAMEDIR/dosdevices/r:/INSTALL.EXE"
+      working_dir: "$GAMEDIR/dosdevices/r:"
+  - task:
+      name: wineexec
+      arch: win64
+      prefix: $GAMEDIR
+      executable: "$GAMEDIR/dosdevices/u:/INSTALL.EXE"
+      working_dir: "$GAMEDIR/dosdevices/u:"
+
+  # The game reads music, video and expansion data from the CD unless the MPQs
+  # are in the game folder (1.12+ then runs without a disc). Copy any the
+  # installers left behind, skipping ones already there in any letter case.
+  - execute:
+      command: >-
+        cd "$GAMEDIR/$gamepath" || exit 1;
+        for mpq in D2CHAR D2DATA D2SFX D2SPEECH D2MUSIC D2VIDEO D2EXP D2XMUSIC D2XTALK D2XVIDEO; do
+        ls | grep -qix "$mpq.mpq" && continue;
+        src=$(find "$CACHE"/cd-* -maxdepth 1 -iname "$mpq.mpq" | head -n 1);
+        if [ -n "$src" ]; then cp "$src" "$(echo $mpq | tr A-Z a-z).mpq"; fi;
+        done
+
+  - input_menu:
+      id: PATCHVER
+      description: "Choose the game's patch version:"
+      preselect: 114d
+      options:
+      - 113c: Install the 1.13c patch
+      - 114d: Install the 1.14d patch
+      - none: Don't patch (the game will ask for the Play Disc)
+  - execute:
+      command: if [ "$INPUT" = "none" ]; then echo "[INFO] Not patching"; else echo "[INFO] Installing LODPatch_$INPUT.exe"; WINEPREFIX="$GAMEDIR" WINEARCH=win64 "$WINEBIN" "$CACHE/patch$INPUT/LODPatch_$INPUT.exe"; fi
+  # The disc folders live in the installer cache, which Lutris deletes; drop
+  # the drive links so they don't dangle
+  - execute:
+      command: rm -f "$GAMEDIR/dosdevices/r:" "$GAMEDIR/dosdevices/p:" "$GAMEDIR/dosdevices/q:" "$GAMEDIR/dosdevices/u:"
+
+  wine:
+    dgvoodoo2: true
