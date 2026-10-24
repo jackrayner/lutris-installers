@@ -29,6 +29,22 @@ Requires `7z` and `sha256sum` on the host.
 - `size=[w,h]` under `[game]`: pick exactly half (or a third) of your screen resolution for crisp integer scaling, e.g. `size=[1128,752]` on a 2256×1504 screen.
 - `nomotionprediction=true` under `[optouts]`: keep the game's native 25 fps instead of smooth motion at your refresh rate, which saves a little power.
 
+## Tests
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python3 -m pytest
+```
+
+They run offline without Lutris, and also in GitHub Actions on every push and pull request.
+
+- **Every `*.yml` installer** (`tests/test_installers.py`): required fields, known Lutris commands, every `$variable` defined, shell steps that parse with `bash -n` after substitution, and a SHA-256 check for every download. They also catch shell variables that would be silently replaced by a Lutris variable of the same name.
+- **The Diablo II script** (`tests/test_diablo_ii.py`): guards against the problems found getting it working, such as disc drives on letters Wine or Proton take over, a copy loop that fails on its last item, and D2DX's Wine compatibility fix being dropped.
+
+`tests/lutris.py` mirrors the parts of Lutris 0.5.22's installer behaviour the tests rely on.
+
 ## License
 
 [MIT](./LICENSE)

@@ -1,0 +1,5 @@
+{
+  "default": true,
+  // Prose is written as long, unwrapped lines by deliberate style.
+  "MD013": false
+}
