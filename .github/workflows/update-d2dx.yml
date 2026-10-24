@@ -1,0 +1,80 @@
+name: Update D2DX
+
+# Opens a pull request when jackrayner/d2dx publishes a newer release than the one the
+# Diablo II installer pins. It never merges: CI can't run the game, so each bump needs an
+# in-game test first (the pull request description says so).
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      include_prereleases:
+        description: Also consider prereleases
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: "pip"
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Look for a newer D2DX release
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INCLUDE_PRERELEASES: ${{ inputs.include_prereleases }}
+        run: |
+          args=(--body-file "$RUNNER_TEMP/pr-body.md")
+          if [ "$INCLUDE_PRERELEASES" = "true" ]; then
+            args+=(--include-prereleases)
+          fi
+          python3 scripts/update_d2dx.py "${args[@]}"
+
+      # Pull requests opened with GITHUB_TOKEN don't trigger the Test workflow, so run the
+      # suite here, on the updated installer, before anything is pushed.
+      - name: Run the tests on the updated installer
+        if: steps.update.outputs.changed == 'true'
+        run: python3 -m pytest -v
+
+      - name: Open a pull request
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.update.outputs.tag }}
+          OLD_TAG: ${{ steps.update.outputs.old_tag }}
+        run: |
+          branch="automation/d2dx-$TAG"
+          if [ -n "$(gh pr list --state all --head "$branch" --json number --jq '.[].number')" ]; then
+            echo "A pull request for $branch already exists; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add diablo-ii-lod-original-cds.yml
+          git commit -m "chore(d2dx): update to $TAG" -m "Bump the pinned D2DX release from $OLD_TAG to $TAG."
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(d2dx): update to $TAG" \
+            --body-file "$RUNNER_TEMP/pr-body.md"
