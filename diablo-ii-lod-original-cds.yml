@@ -176,6 +176,7 @@ script:
       content: |
         [optouts]
         nocompatmodefix=true
+        noclipcursor=true
   # The disc folders live in the installer cache, which Lutris deletes; drop
   # the drive links so they don't dangle
   - execute:
