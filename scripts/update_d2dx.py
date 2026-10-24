@@ -21,7 +21,7 @@ from pathlib import Path
 
 API = "https://api.github.com"
 DEFAULT_REPO = "jackrayner/d2dx"
-DEFAULT_FILE = Path(__file__).resolve().parent.parent / "diablo-ii-lod-original-cds.yml"
+DEFAULT_FILE = Path(__file__).resolve().parent.parent / "diablo-ii-original-cds" / "installer.yml"
 ASSET = "d2dx.zip"
 DLL = "glide3x.dll"
 MAX_ZIP_BYTES = 50 * 1024 * 1024
