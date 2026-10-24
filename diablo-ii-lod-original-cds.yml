@@ -25,7 +25,7 @@ script:
     gamepath: drive_c/Program Files (x86)/Diablo II
     patch113c_sha256: 2301158bb44062094e8dbfbe40dde6f20f870fc88190975c34379280e7aef781
     patch114d_sha256: 5ee5b6f09c338324db14ea3ec03a4b8a9b36e4eea249bb12f1fb592558d6434d
-    d2dx_sha256: 94241eaf97a7eba6800370a65477ed08f91e53da01d18b253b96cf44f506efa9
+    d2dx_sha256: a1450ffc1d064d50645f9f290b9ada4dc3e6972632b83fbd4bd1efaef097a816
 
   files:
   - install_iso: "N/A:Select the Diablo II INSTALL disc ISO"
@@ -34,7 +34,7 @@ script:
   - expansion_iso: "N/A:Select the Lord of Destruction EXPANSION ISO"
   - patch113c: http://ftp.blizzard.com/pub/diablo2exp/patches/PC/LODPatch_113c.exe
   - patch114d: http://ftp.blizzard.com/pub/diablo2exp/patches/PC/LODPatch_114d.exe
-  - d2dx: https://github.com/bolrog/d2dx/releases/download/0.99.529/d2dx.zip
+  - d2dx: https://github.com/jackrayner/d2dx/releases/download/0.0.1/d2dx.zip
 
   game:
     arch: win64
