@@ -5,8 +5,8 @@ slug: diablo-ii-lord-of-destruction-original-4-cd-iso
 runner: wine
 description: >-
   Installs Diablo II and Lord of Destruction from ISO images of the original
-  retail CDs (Install, Play Disc, Cinematics, Expansion), then patches to
-  1.13c or 1.14d. Based on the "Battle Chest 4 CD" Lutris script.
+  retail CDs (Install, Play Disc, Cinematics, Expansion), patches to 1.13c or
+  1.14d and renders with D2DX. Based on the "Battle Chest 4 CD" Lutris script.
 notes: >-
   The original Diablo II CDs are three discs (Install, Play Disc, Cinematics)
   rather than the Battle Chest's "installer tome" discs. This script extracts
@@ -14,7 +14,9 @@ notes: >-
   labelled CD-ROM drive in Wine (R: Install, P: Play Disc, Q: Cinematics,
   U: Expansion), so the installers find every disc without a swap. In each
   installer choose the default install folder and a Full installation; exit
-  the installer when it finishes to continue.
+  the installer when it finishes to continue. The game runs through the D2DX
+  Glide wrapper (Game.exe -3dfx), which fixes the original's busy loop that
+  keeps a CPU core at 100%, scales cleanly and supports widescreen.
 
 script:
   require-binaries: sha256sum, 7z
@@ -23,6 +25,7 @@ script:
     gamepath: drive_c/Program Files (x86)/Diablo II
     patch113c_sha256: 2301158bb44062094e8dbfbe40dde6f20f870fc88190975c34379280e7aef781
     patch114d_sha256: 5ee5b6f09c338324db14ea3ec03a4b8a9b36e4eea249bb12f1fb592558d6434d
+    d2dx_sha256: 94241eaf97a7eba6800370a65477ed08f91e53da01d18b253b96cf44f506efa9
 
   files:
   - install_iso: "N/A:Select the Diablo II INSTALL disc ISO"
@@ -31,10 +34,12 @@ script:
   - expansion_iso: "N/A:Select the Lord of Destruction EXPANSION ISO"
   - patch113c: http://ftp.blizzard.com/pub/diablo2exp/patches/PC/LODPatch_113c.exe
   - patch114d: http://ftp.blizzard.com/pub/diablo2exp/patches/PC/LODPatch_114d.exe
+  - d2dx: https://github.com/bolrog/d2dx/releases/download/0.99.529/d2dx.zip
 
   game:
     arch: win64
-    exe: $GAMEDIR/$gamepath/Diablo II.exe
+    exe: $GAMEDIR/$gamepath/Game.exe
+    args: -3dfx
     prefix: $GAMEDIR
 
   installer:
@@ -58,6 +63,9 @@ script:
   - execute:
       file: cp
       args: -n patch114d $CACHE/patch114d/LODPatch_114d.exe
+  - execute:
+      file: $CACHE/checkhash.sh
+      args: d2dx $d2dx_sha256
 
   # Extract the PC (ISO 9660) side of each hybrid CD into its own folder.
   - execute:
@@ -154,13 +162,24 @@ script:
       options:
       - 113c: Install the 1.13c patch
       - 114d: Install the 1.14d patch
-      - none: Don't patch (the game will ask for the Play Disc)
   - execute:
-      command: if [ "$INPUT" = "none" ]; then echo "[INFO] Not patching"; else echo "[INFO] Installing LODPatch_$INPUT.exe"; WINEPREFIX="$GAMEDIR" WINEARCH=win64 "$WINEBIN" "$CACHE/patch$INPUT/LODPatch_$INPUT.exe"; fi
+      command: echo "[INFO] Installing LODPatch_$INPUT.exe"; WINEPREFIX="$GAMEDIR" WINEARCH=win64 "$WINEBIN" "$CACHE/patch$INPUT/LODPatch_$INPUT.exe"
+
+  # D2DX replaces the game's renderer (via -3dfx), fixing the busy loop that
+  # pins a CPU core. nocompatmodefix: D2DX compares RtlGetVersion with
+  # NetServerGetInfo to spot compatibility mode, but Wine answers the latter
+  # from GetVersionEx (6.2 for unmanifested apps), so the check always fires.
+  - execute:
+      command: 7z e -y -o"$GAMEDIR/$gamepath" "$d2dx" glide3x.dll
+  - write_file:
+      file: $GAMEDIR/$gamepath/d2dx.cfg
+      content: |
+        [optouts]
+        nocompatmodefix=true
   # The disc folders live in the installer cache, which Lutris deletes; drop
   # the drive links so they don't dangle
   - execute:
       command: rm -f "$GAMEDIR/dosdevices/r:" "$GAMEDIR/dosdevices/p:" "$GAMEDIR/dosdevices/q:" "$GAMEDIR/dosdevices/u:"
 
   wine:
-    dgvoodoo2: true
+    dgvoodoo2: false
