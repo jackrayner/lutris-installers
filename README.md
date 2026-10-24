@@ -4,9 +4,7 @@ Lutris install scripts for games where the published scripts don't fit the copie
 
 ## Scripts
 
-| Script | Game | What it's for |
-|---|---|---|
-| [`diablo-ii-original-cds`](./diablo-ii-original-cds/) | Diablo II + Lord of Destruction | The original 4 CD retail release, installed from ISO images, patched to 1.13c or 1.14d and run through D2DX |
+- [`diablo-ii-original-cds`](./diablo-ii-original-cds/): Diablo II + Lord of Destruction from ISO images of the original 4 CD retail release, patched to 1.13c or 1.14d and run through D2DX
 
 ## Installing a script
 
@@ -20,7 +18,7 @@ Each folder's README says what it asks for and how it works.
 
 ## Adding a script
 
-1. Create `<name>/installer.yml` and `<name>/README.md`, and add a row to the table above.
+1. Create `<name>/installer.yml` and `<name>/README.md`, and add an entry to the list above.
 2. The generic tests pick up `<name>/installer.yml` on their own. Add `tests/test_<name>.py` for guards specific to that script.
 3. Every download needs a `<id>_sha256` variable and a step that checks it.
 
