@@ -69,6 +69,10 @@ jobs:
             echo "A pull request for $branch already exists; nothing to do."
             exit 0
           fi
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null 2>&1; then
+            echo "::error::$branch already exists but has no pull request, probably from a run that failed after pushing. Delete the branch (or open a pull request from it) and re-run."
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
