@@ -96,7 +96,8 @@ script:
         cp "$fixdir/Widescreen Fix/$res/GfxEngine.dll" "$game/Exe/GfxEngine.dll"
         cp "$fixdir/Music Fix/SoundTracks.cfg" "$game/Config/SoundTracks.cfg"
         cp "$fixdir/Music Fix/Trojans_settle_03.mp3" "$game/Snd/Trojans_settle_03.mp3"
-        # The fix's settings file, with the chosen window size
+        # The fix's settings file with the chosen size as a starting value; the game
+        # rewrites it on first run, and the DLL above is what sets the resolution
         cp "$fixdir/GameSettings.cfg" "$game/Config/GameSettings.cfg"
         sed -i -e "s/WindowWidth = .*/WindowWidth = ${res%x*}/" -e "s/WindowHeight = .*/WindowHeight = ${res#*x}/" "$game/Config/GameSettings.cfg"
         echo "[INFO] Widescreen fix for $res and music fix installed"

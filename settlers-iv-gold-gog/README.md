@@ -14,7 +14,7 @@ Run that from the repository root. If you are logged in to GOG in Lutris (Source
 - **Silent install:** the GOG installer runs with `/SP- /silent /nogui`, so there are no screens to click through.
 - **Widescreen fix:** the fix replaces the game's 1024x768 option with the resolution you pick, by swapping `GfxEngine.dll`. Choose your screen's resolution, or the closest one below it, and leave the in-game resolution alone. The menu offers the eight resolutions the fix ships: 1024x600 up to 1920x1200.
 - **Music fix:** a replacement `SoundTracks.cfg` and the missing Trojan track. The Maya music then resumes after a Dark Tribe or combat theme, and Dark Tribe maps can play music.
-- **Settings:** the fix's `GameSettings.cfg` is copied in with `WindowWidth` and `WindowHeight` set to your choice. The previous script only edited these in the cache, so the width could end up wrong.
+- **Settings:** the fix's `GameSettings.cfg` is copied in with `WindowWidth` and `WindowHeight` set to your choice, as a starting value. The game rewrites this file when it runs (after a play session the width read 1024 and the height 1200 for a 1920x1200 choice), so the resolution you get comes from the widescreen `GfxEngine.dll`, not from these two numbers.
 - **Originals kept:** on the first run `GfxEngine.dll`, `SoundTracks.cfg` and `GameSettings.cfg` are saved next to the new files with an `.orig` suffix. A `.fixes-applied` marker stops a re-run from backing up already fixed files.
 - **Pinned download:** the fix zip comes from a fixed commit of [Armageddon91/Lutris-Script](https://github.com/Armageddon91/Lutris-Script), not `master`, and its SHA-256 is checked before anything is installed. That repository has no licence, so nothing from it is stored here.
 
