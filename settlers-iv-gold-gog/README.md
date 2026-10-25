@@ -18,13 +18,15 @@ Run that from the repository root. If you are logged in to GOG in Lutris (Source
 - **Originals kept:** on the first run `GfxEngine.dll`, `SoundTracks.cfg` and `GameSettings.cfg` are saved next to the new files with an `.orig` suffix. A `.fixes-applied` marker stops a re-run from backing up already fixed files.
 - **Pinned download:** the fix zip comes from a fixed commit of [Armageddon91/Lutris-Script](https://github.com/Armageddon91/Lutris-Script), not `master`, and its SHA-256 is checked before anything is installed. That repository has no licence, so nothing from it is stored here.
 
-## Not verified
+## Verified and not verified
 
-The fix and settings come from the published script. What the repository's tests run is the install step against a synthetic copy of the fix's folder layout. They can't run the game, so these are untested here:
+Checked by installing and playing it with Lutris and Wine:
 
-- the automatic GOG download, which needs a GOG login
-- the game starting at each resolution in Wine
-- `Screenmode = 2` (the fix's value) giving the right mode. The previous script set `Screenmode = 4` instead.
+- the automatic GOG download
+- the install, and the game starting and playing, at 1920x1200 with the fix's `Screenmode = 2`
+- mouse input
+
+The repository's tests can't run the game. They run the install step against a synthetic copy of the fix's folder layout. Not tried: the other seven resolutions, and the manual `setup_*.exe` fallback when you aren't logged in to GOG.
 
 ## Tests
 
