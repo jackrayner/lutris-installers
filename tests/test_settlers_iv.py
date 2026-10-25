@@ -210,3 +210,15 @@ def test_every_menu_size_is_patched_into_the_dll(doc, game, tmp_path, res):
     w, h = map(int, res.split("x"))
     assert int.from_bytes(dll[WIDTH_AT : WIDTH_AT + 2], "little") == w
     assert int.from_bytes(dll[HEIGHT_AT : HEIGHT_AT + 2], "little") == h
+
+
+# The left panel is a fixed bitmap about 1024 pixels tall; on taller screens a strip shows below it
+PANEL_HEIGHT = 1024
+
+
+def test_menu_marks_exactly_the_sizes_that_show_the_panel_gap(doc):
+    menu = next(p for _, n, p in steps(doc) if n == "input_menu" and p.get("id") == "RES")
+    for option in menu["options"]:
+        ((res, label),) = option.items()
+        height = int(res.split("x")[1])
+        assert ("panel gap" in label) == (height > PANEL_HEIGHT), f"{res}: {label}"

@@ -19,6 +19,19 @@ Run that from the repository root. If you are logged in to GOG in Lutris (Source
 - **Originals kept:** on the first run `GfxEngine.dll`, `ddraw.dll`, `SoundTracks.cfg` and `GameSettings.cfg` are saved next to the new files with an `.orig` suffix. A `.fixes-applied` marker stops a re-run from backing up already fixed files.
 - **Pinned download:** the fix zip comes from a fixed commit of [Armageddon91/Lutris-Script](https://github.com/Armageddon91/Lutris-Script), not `master`, and its SHA-256 is checked before anything is installed. That repository has no licence, so nothing from it is stored here.
 
+## Known limitation: a strip below the left panel
+
+On screens taller than about 1024 pixels, a smeared strip shows down the left edge, directly below the interface panel. In a 3840x2160 screen recording the panel is a fixed picture about 208 pixels wide and 1025 tall, and the strip is about 160 pixels wide. Most of the sizes the game ships (640x480 up to 1280x1024) are no taller than the panel, so it covers the whole height. On a taller screen the area below the panel shows the game's landscape fill, stretched into streaks. This is the game's own behaviour, not something the script adds:
+
+- It appears at the game's own 1600x1200, using the stock `GfxEngine.dll`, as reported from playing it.
+- It was already there before cnc-ddraw was installed, with GOG's `ddraw.dll`, as reported from playing it.
+- Putting the size in a different mode slot (1600x1200 instead of the fix's 1024x768 slot, with `Screenmode = 4`) makes no difference.
+- Its height should be the screen height minus about 1024, so about 56 pixels at 1920x1080 and about 1100 at 3840x2160. That comes from the panel's measured size in the 4K recording. I haven't measured the strip at other sizes.
+
+The game's own sizes up to 1280x1024 show none. By the same reasoning the custom sizes up to 1024 pixels high should show none either: 1024x600, 1280x720, 1280x800, 1366x768, 1440x900, 960x640, 1128x752 and 1440x960. None of those has been played, so that is a prediction. The menu marks the sizes taller than 1024 "panel gap". 1128x752 and 1440x960 are exact halves of 2256x1504 and 2880x1920, so they scale cleanly on those panels.
+
+I haven't found a documented fix. A real one would mean changing the game's drawing code to clip the landscape at the panel's height, which this script doesn't attempt.
+
 ## Verified and not verified
 
 Checked by installing and playing it with Lutris and Wine (GE-Proton) on a 2256x1504 screen:
