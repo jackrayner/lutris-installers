@@ -27,7 +27,8 @@ notes: >-
   GameSettings.cfg and ddraw.dll are kept next to the new ones with an .orig
   suffix. The resolution is applied by a script Lutris runs before each launch, so
   you can change it later by editing the S4_RESOLUTION environment variable under
-  Configure, System options.
+  Configure, System options. The default, auto, uses the primary display's size
+  (the game always opens there); auto/2 uses exactly half of it.
 
 script:
   require-binaries: sha256sum, 7z
@@ -93,8 +94,9 @@ script:
       content: |
         #!/bin/bash
         # Sets the Settlers IV resolution before each launch. The size comes from the
-        # S4_RESOLUTION environment variable as WIDTHxHEIGHT; change it in Lutris under
-        # Configure, System options, Environment variables. The stock GfxEngine.dll keeps
+        # S4_RESOLUTION environment variable: WIDTHxHEIGHT, or auto (the primary display's
+        # size, where the game opens) or auto/2, auto/3 (an exact fraction of it). Change it
+        # in Lutris under Configure, System options, Environment variables. The stock GfxEngine.dll keeps
         # the 1024x768 mode as two 16-bit numbers (bytes 67214 and 67219), rewritten here
         # from the saved original. This never fails the launch: if anything is wrong it
         # says so and leaves the DLL as it is.
@@ -104,6 +106,47 @@ script:
         dll="$exe/GfxEngine.dll"
         tmp="$dll.new"
         put16() { printf "$(printf '\\%03o\\%03o' $(($2 & 255)) $(($2 >> 8)))" | dd of="$tmp" bs=1 seek="$1" conv=notrunc 2>/dev/null; }
+        # auto: GNOME's display service gives the primary display's current mode. Elsewhere,
+        # or if that fails, the kernel's list of connected displays is used when there is
+        # exactly one. $1 overrides /sys/class/drm, for the tests only.
+        primary_mode() {
+          busctl --user --json=short call org.gnome.Mutter.DisplayConfig /org/gnome/Mutter/DisplayConfig org.gnome.Mutter.DisplayConfig GetCurrentState 2>/dev/null | python3 -I -c '
+        import json, sys
+        try:
+            serial, monitors, logical, props = json.load(sys.stdin)["data"]
+            conn = next(lm[5][0][0] for lm in logical if lm[4])
+            mon = next(m for m in monitors if m[0][0] == conn)
+            mode = next(md for md in mon[1] if md[6].get("is-current", {}).get("data"))
+            print("%dx%d GNOME primary display %s" % (mode[1], mode[2], conn))
+        except Exception:
+            pass' 2>/dev/null
+        }
+        only_display_mode() {
+          drm_dir="${1:-/sys/class/drm}"; found=""; count=0
+          for out in "$drm_dir"/card*-*; do
+            [ "$(cat "$out/status" 2>/dev/null)" = connected ] && [ "$(cat "$out/enabled" 2>/dev/null)" = enabled ] || continue
+            mode="$(head -n 1 "$out/modes" 2>/dev/null)"
+            [ -n "$mode" ] || continue
+            count=$((count + 1)); found="$mode the only connected display, ${out##*/}"
+          done
+          if [ "$count" = 1 ]; then echo "$found"; fi
+        }
+        case "$size" in
+          auto|auto/[1-9])
+            div=1; if [ "$size" != auto ]; then div="${size#auto/}"; fi
+            found="$(primary_mode)"; if [ -z "$found" ]; then found="$(only_display_mode "$1")"; fi
+            native="${found%% *}"
+            if [[ ! "$native" =~ ^[0-9]{1,5}x[0-9]{1,5}$ ]]; then
+              echo "[set-resolution] $size: could not tell the primary display's size; leaving the resolution as it is"; exit 0
+            fi
+            nw=$((10#${native%x*})); nh=$((10#${native#*x}))
+            if [ $((nw % div)) -ne 0 ] || [ $((nh % div)) -ne 0 ]; then
+              echo "[set-resolution] $size: $native does not divide exactly by $div; leaving the resolution as it is"; exit 0
+            fi
+            echo "[set-resolution] $size: $native from the ${found#* }"
+            size="$((nw / div))x$((nh / div))"
+            ;;
+        esac
         w="${size%x*}"; h="${size#*x}"
         if [[ "$size" != *x* ]] || [[ ! "$w" =~ ^[0-9]{1,5}$ ]] || [[ ! "$h" =~ ^[0-9]{1,5}$ ]]; then
           echo "[set-resolution] S4_RESOLUTION='$size' is not WIDTHxHEIGHT; leaving the resolution as it is"; exit 0
@@ -127,9 +170,11 @@ script:
 
   - input_menu:
       id: RES
-      description: "Choose the widescreen resolution (it replaces the game's 1024x768 option). Sizes marked 'panel gap' are taller than 1024 pixels and show a smeared strip under the left panel, which the game does at its own 1600x1200 too:"
-      preselect: 1920x1080
+      description: "Choose the widescreen resolution (it replaces the game's 1024x768 option). Auto follows the primary display at every launch. Sizes marked 'panel gap' are taller than 1024 pixels and show a smeared strip under the left panel, which the game does at its own 1600x1200 too:"
+      preselect: auto
       options:
+      - auto: Auto (the primary display's size, where the game opens)
+      - auto/2: Auto, half size (sharp 2x scaling on the primary display)
       - 1024x600: 1024x600
       - 1280x720: 1280x720
       - 1280x800: 1280x800
@@ -166,14 +211,22 @@ script:
         # chosen size (it also runs before every launch). Check it did, since it never fails.
         chmod +x "$GAMEDIR/set-resolution.sh"
         S4_RESOLUTION="$res" "$GAMEDIR/set-resolution.sh"
-        rw=${res%x*}; rh=${res#*x}
-        [ "$(od -An -tu2 -j 67214 -N 2 "$game/Exe/GfxEngine.dll" | tr -d ' ')" = "$rw" ] && [ "$(od -An -tu2 -j 67219 -N 2 "$game/Exe/GfxEngine.dll" | tr -d ' ')" = "$rh" ] || { echo "[ERROR] could not set the resolution to $res"; exit 1; }
+        case "$res" in
+          auto*) cmp -s "$game/Exe/GfxEngine.dll" "$game/Exe/GfxEngine.dll.orig" && echo "[INFO] $res: no display detected now; the size is set at each launch" ;;
+          *)
+            rw=${res%x*}; rh=${res#*x}
+            [ "$(od -An -tu2 -j 67214 -N 2 "$game/Exe/GfxEngine.dll" | tr -d ' ')" = "$rw" ] && [ "$(od -An -tu2 -j 67219 -N 2 "$game/Exe/GfxEngine.dll" | tr -d ' ')" = "$rh" ] || { echo "[ERROR] could not set the resolution to $res"; exit 1; }
+            ;;
+        esac
         cp "$fixdir/Music Fix/SoundTracks.cfg" "$game/Config/SoundTracks.cfg"
         cp "$fixdir/Music Fix/Trojans_settle_03.mp3" "$game/Snd/Trojans_settle_03.mp3"
         # The fix's settings file with the chosen size as a starting value; the game
         # rewrites it on first run, and the DLL above is what sets the resolution
         cp "$fixdir/GameSettings.cfg" "$game/Config/GameSettings.cfg"
-        sed -i -e "s/WindowWidth = .*/WindowWidth = ${res%x*}/" -e "s/WindowHeight = .*/WindowHeight = ${res#*x}/" "$game/Config/GameSettings.cfg"
+        case "$res" in
+          auto*) ;;
+          *) sed -i -e "s/WindowWidth = .*/WindowWidth = ${res%x*}/" -e "s/WindowHeight = .*/WindowHeight = ${res#*x}/" "$game/Config/GameSettings.cfg" ;;
+        esac
         # cnc-ddraw replaces GOG's ddraw.dll. Its default frame limiter stops the game
         # spinning a core; singlecpu=true would pin the game to CPU0, so turn it off.
         cp "$CACHE/cncddraw/ddraw.dll" "$game/Exe/ddraw.dll"

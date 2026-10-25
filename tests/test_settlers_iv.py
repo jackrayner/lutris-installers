@@ -1,5 +1,6 @@
 """Guards for the Settlers IV Gold (GOG) script."""
 
+import json
 import os
 import re
 import subprocess
@@ -13,6 +14,8 @@ RESOLUTIONS = [
     "1920x1200", "2560x1440", "2560x1600", "960x640", "1128x752", "1440x960", "1800x1200",
     "2256x1504", "2880x1920", "3840x2160",
 ]  # fmt: skip
+AUTO_OPTIONS = ["auto", "auto/2"]
+DATA = REPO / "tests" / "data"
 # The stock GfxEngine.dll keeps the 1024x768 mode as two 16-bit numbers at these offsets
 WIDTH_AT, HEIGHT_AT = 67214, 67219
 
@@ -68,8 +71,8 @@ def test_gog_installer_runs_silently(doc):
 
 def test_menu_offers_the_resolutions_it_can_patch(doc):
     menu = next(p for _, n, p in steps(doc) if n == "input_menu" and p.get("id") == "RES")
-    assert [next(iter(o)) for o in menu["options"]] == RESOLUTIONS
-    assert menu["preselect"] in RESOLUTIONS
+    assert [next(iter(o)) for o in menu["options"]] == AUTO_OPTIONS + RESOLUTIONS
+    assert menu["preselect"] == "auto"
 
 
 def _stock_dll():
@@ -137,12 +140,13 @@ def _write_launch_script(doc, tmp_path):
     return path
 
 
-def _run_install(doc, tmp_path, res):
+def _run_install(doc, tmp_path, res, env=None):
     _write_launch_script(doc, tmp_path)
     return subprocess.run(
         ["bash", "-c", substitute(_install_command(doc), _values(doc, tmp_path, res))],
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
@@ -214,13 +218,13 @@ def test_launch_script_is_valid_bash_with_install_time_values_substituted(doc, t
     assert "$gamepath" not in script.read_text()  # substituted at install time
 
 
-def _launch(doc, tmp_path, size, cwd=None):
+def _launch(doc, tmp_path, size, cwd=None, args=(), env=None):
     script = _write_launch_script(doc, tmp_path)
-    env = {k: v for k, v in os.environ.items() if k != "S4_RESOLUTION"}
+    env = {k: v for k, v in (env or os.environ).items() if k != "S4_RESOLUTION"}
     if size is not None:
         env["S4_RESOLUTION"] = size
     return subprocess.run(
-        [str(script)], capture_output=True, text=True, env=env, cwd=cwd or tmp_path
+        [str(script), *args], capture_output=True, text=True, env=env, cwd=cwd or tmp_path
     )
 
 
@@ -287,6 +291,8 @@ def test_three_by_two_labels_are_really_three_by_two(doc):
     menu = next(p for _, n, p in steps(doc) if n == "input_menu" and p.get("id") == "RES")
     for option in menu["options"]:
         ((res, label),) = option.items()
+        if res in AUTO_OPTIONS:
+            continue
         w, h = map(int, res.split("x"))
         if "3:2" in label:
             assert w * 2 == h * 3, f"{res} is labelled 3:2"
@@ -296,6 +302,8 @@ def test_integer_fraction_labels_are_exact(doc):
     menu = next(p for _, n, p in steps(doc) if n == "input_menu" and p.get("id") == "RES")
     for option in menu["options"]:
         ((res, label),) = option.items()
+        if res in AUTO_OPTIONS:
+            continue
         match = re.search(r"1/(\d) of (\d+)x(\d+)", label)
         if match:
             k, panel_w, panel_h = map(int, match.groups())
@@ -322,5 +330,128 @@ def test_menu_marks_exactly_the_sizes_that_show_the_panel_gap(doc):
     menu = next(p for _, n, p in steps(doc) if n == "input_menu" and p.get("id") == "RES")
     for option in menu["options"]:
         ((res, label),) = option.items()
+        if res in AUTO_OPTIONS:
+            continue
         height = int(res.split("x")[1])
         assert ("panel gap" in label) == (height > PANEL_HEIGHT), f"{res}: {label}"
+
+
+def _gnome(tmp_path, layout):
+    """An environment whose busctl replays a recorded GNOME layout, or fails if None."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "busctl"
+    if layout:
+        stub.write_text(f"#!/bin/sh\ncat '{DATA / layout}'\n")
+    else:
+        stub.write_text("#!/bin/sh\nexit 1\n")
+    stub.chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+
+def _drm(tmp_path, *outputs):
+    """A fake /sys/class/drm: (name, status, enabled, first mode) per output."""
+    drm = tmp_path / "drm"
+    drm.mkdir(exist_ok=True)
+    for name, status, enabled, mode in outputs:
+        out = drm / name
+        out.mkdir()
+        (out / "status").write_text(status + "\n")
+        (out / "enabled").write_text(enabled + "\n")
+        (out / "modes").write_text(f"{mode}\n1920x1080\n" if mode else "")
+    return drm
+
+
+@pytest.mark.parametrize(
+    ("layout", "size", "expected"),
+    [
+        ("gnome-4k-primary.json", "auto", (3840, 2160)),
+        ("gnome-4k-primary.json", "auto/2", (1920, 1080)),
+        ("gnome-4k-primary.json", "auto/3", (1280, 720)),
+        ("gnome-laptop-primary.json", "auto", (2256, 1504)),
+        ("gnome-laptop-primary.json", "auto/2", (1128, 752)),
+        ("gnome-laptop-only.json", "auto", (2256, 1504)),
+    ],
+)
+def test_auto_uses_the_gnome_primary_display(doc, saved_stock, tmp_path, layout, size, expected):
+    # the recorded layouts have two screens, and the game opens on whichever is primary
+    result = _launch(doc, tmp_path, size, env=_gnome(tmp_path, layout))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "GNOME primary display" in result.stdout
+    assert _size((saved_stock / "Exe/GfxEngine.dll").read_bytes()) == expected
+
+
+def test_auto_refuses_a_fraction_that_does_not_divide_exactly(doc, saved_stock, tmp_path):
+    before = (saved_stock / "Exe/GfxEngine.dll").read_bytes()
+    env = _gnome(tmp_path, "gnome-laptop-primary.json")
+    result = _launch(doc, tmp_path, "auto/3", env=env)  # 1504 / 3 isn't whole
+    assert result.returncode == 0
+    assert "does not divide exactly" in result.stdout
+    assert (saved_stock / "Exe/GfxEngine.dll").read_bytes() == before
+
+
+def test_auto_falls_back_to_the_only_connected_display(doc, saved_stock, tmp_path):
+    drm = _drm(
+        tmp_path,
+        ("card1-eDP-1", "connected", "enabled", "2256x1504"),
+        ("card1-DP-1", "disconnected", "disabled", "3840x2160"),
+        ("card1-Writeback-1", "unknown", "disabled", ""),
+    )
+    result = _launch(doc, tmp_path, "auto/2", args=[str(drm)], env=_gnome(tmp_path, None))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "only connected display, card1-eDP-1" in result.stdout
+    assert _size((saved_stock / "Exe/GfxEngine.dll").read_bytes()) == (1128, 752)
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        [
+            ("card1-eDP-1", "connected", "enabled", "2256x1504"),
+            ("card1-DP-3", "connected", "enabled", "3840x2160"),
+        ],
+        [("card1-eDP-1", "connected", "disabled", "2256x1504")],
+        [],
+    ],
+    ids=["two displays", "only a disabled one", "none"],
+)  # fmt: skip
+def test_auto_without_gnome_does_not_guess(doc, saved_stock, tmp_path, outputs):
+    before = (saved_stock / "Exe/GfxEngine.dll").read_bytes()
+    drm = _drm(tmp_path, *outputs)
+    result = _launch(doc, tmp_path, "auto", args=[str(drm)], env=_gnome(tmp_path, None))
+    assert result.returncode == 0
+    assert "could not tell the primary display's size" in result.stdout
+    assert (saved_stock / "Exe/GfxEngine.dll").read_bytes() == before
+
+
+def test_auto_ignores_a_gnome_layout_without_a_primary(doc, saved_stock, tmp_path):
+    layout = json.loads((DATA / "gnome-4k-primary.json").read_text())
+    for logical in layout["data"][2]:
+        logical[4] = False
+    (tmp_path / "no-primary.json").write_text(json.dumps(layout))
+    env = _gnome(tmp_path, None)
+    (tmp_path / "bin/busctl").write_text(f"#!/bin/sh\ncat '{tmp_path / 'no-primary.json'}'\n")
+    drm = _drm(tmp_path, ("card1-eDP-1", "connected", "enabled", "2256x1504"))
+    result = _launch(doc, tmp_path, "auto", args=[str(drm)], env=env)
+    assert "only connected display" in result.stdout
+    assert _size((saved_stock / "Exe/GfxEngine.dll").read_bytes()) == (2256, 1504)
+
+
+@pytest.mark.parametrize("size", ["auto/0", "auto/10", "auto/", "Auto", "auto/2x"])
+def test_malformed_auto_values_are_refused(doc, saved_stock, tmp_path, size):
+    before = (saved_stock / "Exe/GfxEngine.dll").read_bytes()
+    result = _launch(doc, tmp_path, size, env=_gnome(tmp_path, "gnome-4k-primary.json"))
+    assert result.returncode == 0
+    assert "leaving the resolution as it is" in result.stdout
+    assert (saved_stock / "Exe/GfxEngine.dll").read_bytes() == before
+
+
+def test_install_step_with_auto(doc, game, tmp_path):
+    env = _gnome(tmp_path, "gnome-laptop-primary.json")
+    result = _run_install(doc, tmp_path, "auto", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _size((game / "Exe/GfxEngine.dll").read_bytes()) == (2256, 1504)
+    # the fix's settings file keeps its own size instead of the literal "auto"
+    settings = (game / "Config/GameSettings.cfg").read_text()
+    assert "WindowWidth = 1024" in settings
+    assert "auto" not in settings
