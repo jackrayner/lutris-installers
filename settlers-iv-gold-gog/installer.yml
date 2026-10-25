@@ -6,17 +6,21 @@ runner: wine
 gogid: 1207659254
 description: >-
   Installs The Settlers IV: Gold Edition from the GOG offline installer, then
-  applies the community widescreen fix for the resolution you choose and the
-  music fix. Based on the "GOG + Fix" Lutris script.
+  applies the community widescreen fix at the resolution you choose, the
+  music fix, and cnc-ddraw to stop the game using a whole CPU core. Based on
+  the "GOG + Fix" Lutris script.
 notes: >-
   If you are logged in to GOG in Lutris (Sources, GOG) and own the game, the
   offline installer is downloaded for you and checked against GOG's checksum.
   Otherwise you are asked to select the setup_*.exe you downloaded from GOG.
   The install runs silently, so there is nothing to click through. The widescreen
   fix replaces the game's 1024x768 option with the resolution you pick, so
-  choose your screen's resolution (or the closest one below it) and leave the
-  in-game resolution alone. Your original GfxEngine.dll and SoundTracks.cfg are
-  kept next to the new ones with an .orig suffix.
+  choose your screen's resolution (or the closest one below it; 3:2 sizes and integer fractions of two 3:2 panels are offered) and leave the
+  in-game resolution alone. cnc-ddraw replaces GOG's ddraw.dll: the original
+  game spins one CPU core at about 100% waiting for each frame, and cnc-ddraw's
+  frame limiter brings that down to about a third. Your original GfxEngine.dll,
+  SoundTracks.cfg, GameSettings.cfg and ddraw.dll are kept next to the new ones
+  with an .orig suffix.
 
 script:
   require-binaries: sha256sum, 7z
@@ -24,6 +28,7 @@ script:
   variables:
     gamepath: drive_c/GOG Games/Settlers 4 Gold
     fix_sha256: 880d5cafeabebc314e0a098898d5e399158494b27158b4bb280cf11edb4b9063
+    cncddraw_sha256: 0b13ab89a64c9918189b1dadd449ef6ed3cb3b7b19cabd96d8adbd95505bb908
 
   files:
   # Lutris swaps this first N/A file for a download from your GOG library when
@@ -31,6 +36,8 @@ script:
   - gog_setup: "N/A:Select the Settlers IV Gold offline installer (setup_*.exe) downloaded from GOG"
   # Pinned to a commit, not master; the zip is also checked against fix_sha256.
   - fix: https://github.com/Armageddon91/Lutris-Script/raw/a35aa72684bbf0f5e5aa1d2463c0001e789dbea3/The%20Settlers%20IV/The%20Settler%204%20Fix.zip
+  # cnc-ddraw v7.1.0.0 (MIT), a DirectDraw wrapper with a frame limiter
+  - cncddraw: https://github.com/FunkyFr3sh/cnc-ddraw/releases/download/v7.1.0.0/cnc-ddraw.zip
 
   game:
     arch: win64
@@ -49,6 +56,9 @@ script:
   - execute:
       file: $CACHE/checkhash.sh
       args: fix $fix_sha256
+  - execute:
+      file: $CACHE/checkhash.sh
+      args: cncddraw $cncddraw_sha256
 
   - task:
       name: create_prefix
@@ -62,7 +72,7 @@ script:
       description: Installing the game, please wait...
 
   - execute:
-      command: 7z x -y -o"$CACHE/s4fix" "$fix"
+      command: 7z x -y -o"$CACHE/s4fix" "$fix" && 7z e -y -o"$CACHE/cncddraw" "$cncddraw" ddraw.dll ddraw.ini
 
   - input_menu:
       id: RES
@@ -77,6 +87,15 @@ script:
       - 1680x1050: 1680x1050
       - 1920x1080: 1920x1080
       - 1920x1200: 1920x1200
+      - 2560x1440: 2560x1440
+      - 2560x1600: 2560x1600
+      - 960x640: 960x640 (3:2, 1/3 of 2880x1920)
+      - 1128x752: 1128x752 (3:2, 1/2 of 2256x1504)
+      - 1440x960: 1440x960 (3:2, 1/2 of 2880x1920)
+      - 1800x1200: 1800x1200 (3:2)
+      - 2256x1504: 2256x1504 (3:2)
+      - 2880x1920: 2880x1920 (3:2)
+      - 3840x2160: 3840x2160 (4K)
 
   - execute:
       command: |
@@ -85,19 +104,33 @@ script:
         fixdir="$CACHE/s4fix/The Settler 4 Fix"
         game="$GAMEDIR/$gamepath"
         [ -f "$game/S4.exe" ] || { echo "[ERROR] S4.exe not found in $game, did the installer finish?"; exit 1; }
-        [ -f "$fixdir/Widescreen Fix/$res/GfxEngine.dll" ] || { echo "[ERROR] no widescreen fix for $res"; exit 1; }
+        # The widescreen fix is two 16-bit numbers in the stock GfxEngine.dll: the 1024x768
+        # mode, at byte offsets 67214 (width) and 67219 (height). Patching them here gives
+        # any size, not just the ones the fix ships a DLL for. Refuse if the bytes aren't 1024/768.
+        stock="$fixdir/Widescreen Fix/Standard/GfxEngine.dll"
+        rw=${res%x*}; rh=${res#*x}
+        [ "$(od -An -tx1 -j 67214 -N 2 "$stock" | tr -d ' ')" = 0004 ] && [ "$(od -An -tx1 -j 67219 -N 2 "$stock" | tr -d ' ')" = 0003 ] || { echo "[ERROR] unexpected stock GfxEngine.dll, not patching"; exit 1; }
+        put16() { printf "$(printf '\\%03o\\%03o' $(($2 & 255)) $(($2 >> 8)))" | dd of="$CACHE/GfxEngine.dll.new" bs=1 seek="$1" conv=notrunc 2>/dev/null; }
+        cp "$stock" "$CACHE/GfxEngine.dll.new"
+        put16 67214 "$rw"
+        put16 67219 "$rh"
         # Keep the originals on the first run only, so a re-run never backs up fixed files
         if [ ! -f "$game/.fixes-applied" ]; then
-          for f in Exe/GfxEngine.dll Config/SoundTracks.cfg Config/GameSettings.cfg; do
+          for f in Exe/GfxEngine.dll Exe/ddraw.dll Config/SoundTracks.cfg Config/GameSettings.cfg; do
             if [ -f "$game/$f" ]; then cp "$game/$f" "$game/$f.orig"; fi
           done
           touch "$game/.fixes-applied"
         fi
-        cp "$fixdir/Widescreen Fix/$res/GfxEngine.dll" "$game/Exe/GfxEngine.dll"
+        cp "$CACHE/GfxEngine.dll.new" "$game/Exe/GfxEngine.dll"
         cp "$fixdir/Music Fix/SoundTracks.cfg" "$game/Config/SoundTracks.cfg"
         cp "$fixdir/Music Fix/Trojans_settle_03.mp3" "$game/Snd/Trojans_settle_03.mp3"
         # The fix's settings file with the chosen size as a starting value; the game
         # rewrites it on first run, and the DLL above is what sets the resolution
         cp "$fixdir/GameSettings.cfg" "$game/Config/GameSettings.cfg"
         sed -i -e "s/WindowWidth = .*/WindowWidth = ${res%x*}/" -e "s/WindowHeight = .*/WindowHeight = ${res#*x}/" "$game/Config/GameSettings.cfg"
-        echo "[INFO] Widescreen fix for $res and music fix installed"
+        # cnc-ddraw replaces GOG's ddraw.dll. Its default frame limiter stops the game
+        # spinning a core; singlecpu=true would pin the game to CPU0, so turn it off.
+        cp "$CACHE/cncddraw/ddraw.dll" "$game/Exe/ddraw.dll"
+        sed '0,/^singlecpu=true/s//singlecpu=false/' "$CACHE/cncddraw/ddraw.ini" > "$game/Exe/ddraw.ini"
+        grep -q '^singlecpu=false' "$game/Exe/ddraw.ini" || { echo "[ERROR] ddraw.ini has no singlecpu setting"; exit 1; }
+        echo "[INFO] Widescreen fix for $res, music fix and cnc-ddraw installed"
