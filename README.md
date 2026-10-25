@@ -5,6 +5,7 @@ Lutris install scripts for games where the published scripts don't fit the copie
 ## Scripts
 
 - [`diablo-ii-original-cds`](./diablo-ii-original-cds/): Diablo II + Lord of Destruction from ISO images of the original 4 CD retail release, patched to 1.13c or 1.14d and run through D2DX
+- [`settlers-iv-gold-gog`](./settlers-iv-gold-gog/): The Settlers IV: Gold Edition from the GOG offline installer, with the community widescreen and music fixes
 
 ## Installing a script
 

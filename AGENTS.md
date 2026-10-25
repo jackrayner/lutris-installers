@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## What this is
 
-Lutris install scripts (YAML) for games where the published scripts don't fit the copies I own. Currently one: `diablo-ii-lod-original-cds.yml`, which installs Diablo II and Lord of Destruction from ISO images of the original retail CDs and runs them through the D2DX Glide wrapper. [`README.md`](./README.md) explains how that script works.
+Lutris install scripts (YAML) for games where the published scripts don't fit the copies I own. Each script has its own folder with an `installer.yml` and a README explaining how it works. [`README.md`](./README.md) lists them.
 
 ## Commands
 
@@ -29,9 +29,9 @@ CI (`.github/workflows/`) runs the tests, ruff and markdownlint. The required ch
 
 ## Structure
 
-- `*.yml` at the repo root: one installer script each. The generic tests pick up any new one automatically.
+- `<script>/installer.yml` and `<script>/README.md`: one folder per installer script. The generic tests pick up any new one automatically.
 - `tests/test_installers.py`: checks every installer: required fields, known Lutris commands, defined variables, `bash -n` on shell steps, and a checksum for every download.
-- `tests/test_diablo_ii.py`: guards for the problems found getting the Diablo II script working.
+- `tests/test_diablo_ii.py`, `tests/test_settlers_iv.py`: guards specific to each script.
 - `tests/lutris.py`: the Lutris semantics mirror described above.
 
 ## Conventions
