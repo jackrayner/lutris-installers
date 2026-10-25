@@ -19,6 +19,18 @@ Run that from the repository root. If you are logged in to GOG in Lutris (Source
 - **Originals kept:** on the first run `GfxEngine.dll`, `ddraw.dll`, `SoundTracks.cfg` and `GameSettings.cfg` are saved next to the new files with an `.orig` suffix. A `.fixes-applied` marker stops a re-run from backing up already fixed files.
 - **Pinned download:** the fix zip comes from a fixed commit of [Armageddon91/Lutris-Script](https://github.com/Armageddon91/Lutris-Script), not `master`, and its SHA-256 is checked before anything is installed. That repository has no licence, so nothing from it is stored here.
 
+## Changing the resolution later
+
+The size is set from an environment variable each time the game starts, so you can change it without reinstalling. In Lutris, right-click the game, then Configure, System options, Environment variables, and edit `S4_RESOLUTION` (for example `2256x1504`). It is `WIDTHxHEIGHT` and can be any size from 1 to 65535 in each direction, not only the sizes in the menu. The next launch applies it.
+
+How it works: the installer writes `set-resolution.sh` into the game folder and sets it as the game's pre-launch command, with "wait for completion" on, so Lutris finishes it before the game starts. The script patches the saved stock `GfxEngine.dll.orig` to the size in `S4_RESOLUTION`, using the same four bytes as the installer, and does nothing if the DLL already has that size. The installer runs the same script once, so there is one implementation.
+
+The script never fails the launch. If the variable is missing or isn't `WIDTHxHEIGHT`, if a number is out of range, or if `GfxEngine.dll.orig` is missing or isn't the expected stock file, it prints a `[set-resolution]` line in Lutris's log and leaves the DLL as it is. The strip under the left panel (above) still applies to any size taller than 1024.
+
+Lutris's DLL overrides table can't do this, because it only chooses whether Wine loads a native or built-in DLL by name, not what is inside it. It is the way to switch cnc-ddraw off (`ddraw` set to `builtin`) for a comparison.
+
+The tests run the script directly (valid and invalid sizes, a missing or odd original, running from any folder, changing size repeatedly and back to 1024x768) and check the `system` section the installer writes. It has not been tried in the real Lutris interface from a fresh install, only by emulating what Lutris does: reading the saved section, splitting the command and running it with the saved environment.
+
 ## Known limitation: a strip below the left panel
 
 On screens taller than about 1024 pixels, a smeared strip shows down the left edge, directly below the interface panel. In a 3840x2160 screen recording the panel is a fixed picture about 208 pixels wide and 1025 tall, and the strip is about 160 pixels wide. Most of the sizes the game ships (640x480 up to 1280x1024) are no taller than the panel, so it covers the whole height. On a taller screen the area below the panel shows the game's landscape fill, stretched into streaks. This is the game's own behaviour, not something the script adds:

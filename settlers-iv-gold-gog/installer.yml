@@ -25,7 +25,9 @@ notes: >-
   100% waiting for each frame, and cnc-ddraw's frame limiter brings that down
   to about a third. Your original GfxEngine.dll, SoundTracks.cfg,
   GameSettings.cfg and ddraw.dll are kept next to the new ones with an .orig
-  suffix.
+  suffix. The resolution is applied by a script Lutris runs before each launch, so
+  you can change it later by editing the S4_RESOLUTION environment variable under
+  Configure, System options.
 
 script:
   require-binaries: sha256sum, 7z
@@ -48,6 +50,14 @@ script:
     arch: win64
     exe: $GAMEDIR/$gamepath/S4.exe
     prefix: $GAMEDIR
+
+  # Before each launch Lutris runs set-resolution.sh, which reads S4_RESOLUTION. To change
+  # the resolution later, edit that variable in the game's Configure, System options.
+  system:
+    env:
+      S4_RESOLUTION: $INPUT_RES
+    prelaunch_command: '"$GAMEDIR/set-resolution.sh"'
+    prelaunch_wait: true
 
   installer:
   - write_file:
@@ -75,6 +85,42 @@ script:
       executable: gog_setup
       args: /SP- /silent /nogui
       description: Installing the game, please wait...
+
+  # Lutris runs this before every launch (see prelaunch_command below), so the resolution
+  # can be changed later by editing S4_RESOLUTION in the game's environment variables.
+  - write_file:
+      file: $GAMEDIR/set-resolution.sh
+      content: |
+        #!/bin/bash
+        # Sets the Settlers IV resolution before each launch. The size comes from the
+        # S4_RESOLUTION environment variable as WIDTHxHEIGHT; change it in Lutris under
+        # Configure, System options, Environment variables. The stock GfxEngine.dll keeps
+        # the 1024x768 mode as two 16-bit numbers (bytes 67214 and 67219), rewritten here
+        # from the saved original. This never fails the launch: if anything is wrong it
+        # says so and leaves the DLL as it is.
+        size="${S4_RESOLUTION:-}"
+        exe="$(cd "$(dirname "$0")" && pwd)/$gamepath/Exe"
+        orig="$exe/GfxEngine.dll.orig"
+        dll="$exe/GfxEngine.dll"
+        tmp="$dll.new"
+        put16() { printf "$(printf '\\%03o\\%03o' $(($2 & 255)) $(($2 >> 8)))" | dd of="$tmp" bs=1 seek="$1" conv=notrunc 2>/dev/null; }
+        w="${size%x*}"; h="${size#*x}"
+        if [[ "$size" != *x* ]] || [[ ! "$w" =~ ^[0-9]{1,5}$ ]] || [[ ! "$h" =~ ^[0-9]{1,5}$ ]]; then
+          echo "[set-resolution] S4_RESOLUTION='$size' is not WIDTHxHEIGHT; leaving the resolution as it is"; exit 0
+        fi
+        w=$((10#$w)); h=$((10#$h))
+        if [ "$w" -lt 1 ] || [ "$w" -gt 65535 ] || [ "$h" -lt 1 ] || [ "$h" -gt 65535 ]; then
+          echo "[set-resolution] $size is out of range (1 to 65535); leaving the resolution as it is"; exit 0
+        fi
+        if [ ! -f "$orig" ]; then
+          echo "[set-resolution] $orig not found; leaving the resolution as it is"; exit 0
+        fi
+        if [ "$(od -An -tx1 -j 67214 -N 2 "$orig" | tr -d ' ')" != 0004 ] || [ "$(od -An -tx1 -j 67219 -N 2 "$orig" | tr -d ' ')" != 0003 ]; then
+          echo "[set-resolution] GfxEngine.dll.orig is not the expected stock file; leaving the resolution as it is"; exit 0
+        fi
+        cp "$orig" "$tmp" && put16 67214 "$w" && put16 67219 "$h" || { rm -f "$tmp"; echo "[set-resolution] could not patch; leaving the resolution as it is"; exit 0; }
+        if cmp -s "$tmp" "$dll"; then rm -f "$tmp"; else mv -f "$tmp" "$dll"; fi
+        echo "[set-resolution] ${w}x${h}"
 
   - execute:
       command: 7z x -y -o"$CACHE/s4fix" "$fix" && 7z e -y -o"$CACHE/cncddraw" "$cncddraw" ddraw.dll ddraw.ini
@@ -109,16 +155,6 @@ script:
         fixdir="$CACHE/s4fix/The Settler 4 Fix"
         game="$GAMEDIR/$gamepath"
         [ -f "$game/S4.exe" ] || { echo "[ERROR] S4.exe not found in $game, did the installer finish?"; exit 1; }
-        # The widescreen fix is two 16-bit numbers in the stock GfxEngine.dll: the 1024x768
-        # mode, at byte offsets 67214 (width) and 67219 (height). Patching them here gives
-        # any size, not just the ones the fix ships a DLL for. Refuse if the bytes aren't 1024/768.
-        stock="$fixdir/Widescreen Fix/Standard/GfxEngine.dll"
-        rw=${res%x*}; rh=${res#*x}
-        [ "$(od -An -tx1 -j 67214 -N 2 "$stock" | tr -d ' ')" = 0004 ] && [ "$(od -An -tx1 -j 67219 -N 2 "$stock" | tr -d ' ')" = 0003 ] || { echo "[ERROR] unexpected stock GfxEngine.dll, not patching"; exit 1; }
-        put16() { printf "$(printf '\\%03o\\%03o' $(($2 & 255)) $(($2 >> 8)))" | dd of="$CACHE/GfxEngine.dll.new" bs=1 seek="$1" conv=notrunc 2>/dev/null; }
-        cp "$stock" "$CACHE/GfxEngine.dll.new"
-        put16 67214 "$rw"
-        put16 67219 "$rh"
         # Keep the originals on the first run only, so a re-run never backs up fixed files
         if [ ! -f "$game/.fixes-applied" ]; then
           for f in Exe/GfxEngine.dll Exe/ddraw.dll Config/SoundTracks.cfg Config/GameSettings.cfg; do
@@ -126,7 +162,12 @@ script:
           done
           touch "$game/.fixes-applied"
         fi
-        cp "$CACHE/GfxEngine.dll.new" "$game/Exe/GfxEngine.dll"
+        # The widescreen fix: set-resolution.sh patches the saved stock GfxEngine.dll to the
+        # chosen size (it also runs before every launch). Check it did, since it never fails.
+        chmod +x "$GAMEDIR/set-resolution.sh"
+        S4_RESOLUTION="$res" "$GAMEDIR/set-resolution.sh"
+        rw=${res%x*}; rh=${res#*x}
+        [ "$(od -An -tu2 -j 67214 -N 2 "$game/Exe/GfxEngine.dll" | tr -d ' ')" = "$rw" ] && [ "$(od -An -tu2 -j 67219 -N 2 "$game/Exe/GfxEngine.dll" | tr -d ' ')" = "$rh" ] || { echo "[ERROR] could not set the resolution to $res"; exit 1; }
         cp "$fixdir/Music Fix/SoundTracks.cfg" "$game/Config/SoundTracks.cfg"
         cp "$fixdir/Music Fix/Trojans_settle_03.mp3" "$game/Snd/Trojans_settle_03.mp3"
         # The fix's settings file with the chosen size as a starting value; the game

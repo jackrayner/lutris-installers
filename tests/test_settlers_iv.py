@@ -1,5 +1,6 @@
 """Guards for the Settlers IV Gold (GOG) script."""
 
+import os
 import re
 import subprocess
 
@@ -71,6 +72,20 @@ def test_menu_offers_the_resolutions_it_can_patch(doc):
     assert menu["preselect"] in RESOLUTIONS
 
 
+def _stock_dll():
+    """A stand-in for the stock GfxEngine.dll: the 1024x768 mode sits at the real offsets."""
+    stock = bytearray(b"stock" * 20000)
+    stock[WIDTH_AT : WIDTH_AT + 2] = (1024).to_bytes(2, "little")
+    stock[HEIGHT_AT : HEIGHT_AT + 2] = (768).to_bytes(2, "little")
+    return bytes(stock)
+
+
+def _size(dll_bytes):
+    width = int.from_bytes(dll_bytes[WIDTH_AT : WIDTH_AT + 2], "little")
+    height = int.from_bytes(dll_bytes[HEIGHT_AT : HEIGHT_AT + 2], "little")
+    return width, height
+
+
 @pytest.fixture
 def game(doc, tmp_path):
     """A fake GOG install plus an extracted fix folder with the layout of the real zip."""
@@ -78,22 +93,17 @@ def game(doc, tmp_path):
     for d in ("Exe", "Config", "Snd"):
         (root / d).mkdir(parents=True)
     (root / "S4.exe").write_text("exe")
-    (root / "Exe/GfxEngine.dll").write_text("original dll")
+    (root / "Exe/GfxEngine.dll").write_bytes(_stock_dll())
     (root / "Config/GameSettings.cfg").write_text("original settings")
     fix = tmp_path / "cache/s4fix/The Settler 4 Fix"
-    stock = bytearray(b"stock" * 20000)
-    stock[WIDTH_AT : WIDTH_AT + 2] = (1024).to_bytes(2, "little")
-    stock[HEIGHT_AT : HEIGHT_AT + 2] = (768).to_bytes(2, "little")
-    (fix / "Widescreen Fix/Standard").mkdir(parents=True)
-    (fix / "Widescreen Fix/Standard/GfxEngine.dll").write_bytes(stock)
     (root / "Exe/ddraw.dll").write_text("gog ddraw")
     cnc = tmp_path / "cache/cncddraw"
-    cnc.mkdir()
+    cnc.mkdir(parents=True)
     (cnc / "ddraw.dll").write_text("cnc ddraw")
     (cnc / "ddraw.ini").write_bytes(
         b"[ddraw]\r\nmaxfps=-1\r\nsinglecpu=true\r\n\r\n[other]\r\nsinglecpu=true\r\n"
     )
-    (fix / "Music Fix").mkdir()
+    (fix / "Music Fix").mkdir(parents=True)
     (fix / "Music Fix/SoundTracks.cfg").write_text("fixed tracks")
     (fix / "Music Fix/Trojans_settle_03.mp3").write_text("mp3")
     (fix / "GameSettings.cfg").write_text(
@@ -102,7 +112,7 @@ def game(doc, tmp_path):
     return root
 
 
-def _run(doc, tmp_path, res):
+def _values(doc, tmp_path, res=""):
     values = placeholder_values(doc)
     values.update(
         GAMEDIR=str(tmp_path / "game"),
@@ -110,17 +120,40 @@ def _run(doc, tmp_path, res):
         INPUT=res,
         gamepath=doc["script"]["variables"]["gamepath"],
     )
-    result = subprocess.run(
-        ["bash", "-c", substitute(_install_command(doc), values)], capture_output=True, text=True
+    return values
+
+
+def _write_launch_script(doc, tmp_path):
+    """Write set-resolution.sh the way the installer's write_file step does."""
+    step = next(
+        p
+        for _, n, p in steps(doc)
+        if n == "write_file" and p["file"].endswith("/set-resolution.sh")
     )
+    path = tmp_path / "game" / "set-resolution.sh"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(substitute(step["content"], _values(doc, tmp_path)))
+    path.chmod(0o755)
+    return path
+
+
+def _run_install(doc, tmp_path, res):
+    _write_launch_script(doc, tmp_path)
+    return subprocess.run(
+        ["bash", "-c", substitute(_install_command(doc), _values(doc, tmp_path, res))],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _run(doc, tmp_path, res):
+    result = _run_install(doc, tmp_path, res)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_install_step_applies_fixes_and_sets_window_size(doc, game, tmp_path):
     _run(doc, tmp_path, "1280x800")
-    dll = (game / "Exe/GfxEngine.dll").read_bytes()
-    assert int.from_bytes(dll[WIDTH_AT : WIDTH_AT + 2], "little") == 1280
-    assert int.from_bytes(dll[HEIGHT_AT : HEIGHT_AT + 2], "little") == 800
+    assert _size((game / "Exe/GfxEngine.dll").read_bytes()) == (1280, 800)
     assert (game / "Config/SoundTracks.cfg").read_text() == "fixed tracks"
     assert (game / "Snd/Trojans_settle_03.mp3").exists()
     settings = (game / "Config/GameSettings.cfg").read_text()
@@ -140,45 +173,114 @@ def test_install_step_installs_cnc_ddraw_without_cpu_pinning(doc, game, tmp_path
 def test_install_step_keeps_originals_even_when_run_twice(doc, game, tmp_path):
     _run(doc, tmp_path, "1920x1080")
     _run(doc, tmp_path, "1280x720")
-    assert (game / "Exe/GfxEngine.dll.orig").read_text() == "original dll"
+    assert (game / "Exe/GfxEngine.dll.orig").read_bytes() == _stock_dll()
     assert (game / "Config/GameSettings.cfg.orig").read_text() == "original settings"
     assert (game / "Exe/ddraw.dll.orig").read_text() == "gog ddraw"
     assert not (game / "Config/SoundTracks.cfg.orig").exists()
-    dll = (game / "Exe/GfxEngine.dll").read_bytes()
-    assert int.from_bytes(dll[WIDTH_AT : WIDTH_AT + 2], "little") == 1280
-    assert int.from_bytes(dll[HEIGHT_AT : HEIGHT_AT + 2], "little") == 720
+    assert _size((game / "Exe/GfxEngine.dll").read_bytes()) == (1280, 720)
 
 
 def test_patch_changes_only_the_four_size_bytes(doc, game, tmp_path):
-    stock = (
-        tmp_path / "cache/s4fix/The Settler 4 Fix/Widescreen Fix/Standard/GfxEngine.dll"
-    ).read_bytes()
     _run(doc, tmp_path, "2256x1504")
+    stock = _stock_dll()
     dll = (game / "Exe/GfxEngine.dll").read_bytes()
     assert len(dll) == len(stock)
     changed = [i for i in range(len(dll)) if dll[i] != stock[i]]
     assert changed == [WIDTH_AT, WIDTH_AT + 1, HEIGHT_AT, HEIGHT_AT + 1]
-    assert dll[WIDTH_AT : WIDTH_AT + 2] == (2256).to_bytes(2, "little")
-    assert dll[HEIGHT_AT : HEIGHT_AT + 2] == (1504).to_bytes(2, "little")
+    assert _size(dll) == (2256, 1504)
 
 
-def test_install_step_refuses_an_unexpected_stock_dll(doc, game, tmp_path):
-    path = tmp_path / "cache/s4fix/The Settler 4 Fix/Widescreen Fix/Standard/GfxEngine.dll"
-    data = bytearray(path.read_bytes())
-    data[WIDTH_AT] = 0x55
-    path.write_bytes(data)
-    values = placeholder_values(doc)
-    values.update(
-        GAMEDIR=str(tmp_path / "game"),
-        CACHE=str(tmp_path / "cache"),
-        INPUT="1920x1200",
-        gamepath=doc["script"]["variables"]["gamepath"],
-    )
-    result = subprocess.run(
-        ["bash", "-c", substitute(_install_command(doc), values)], capture_output=True, text=True
-    )
+def test_install_step_fails_loudly_on_an_unexpected_stock_dll(doc, game, tmp_path):
+    odd = bytearray(_stock_dll())
+    odd[WIDTH_AT] = 0x55
+    (game / "Exe/GfxEngine.dll").write_bytes(odd)
+    result = _run_install(doc, tmp_path, "1920x1200")
     assert result.returncode != 0
-    assert (game / "Exe/GfxEngine.dll").read_text() == "original dll"
+    assert "could not set the resolution" in result.stdout
+    assert (game / "Exe/GfxEngine.dll").read_bytes() == bytes(odd)
+
+
+def test_system_config_runs_set_resolution_before_launch(doc):
+    system = doc["script"]["system"]
+    assert system["env"] == {"S4_RESOLUTION": "$INPUT_RES"}
+    assert system["prelaunch_command"] == '"$GAMEDIR/set-resolution.sh"'
+    assert system["prelaunch_wait"] is True
+
+
+def test_launch_script_is_valid_bash_with_install_time_values_substituted(doc, tmp_path):
+    script = _write_launch_script(doc, tmp_path)
+    assert subprocess.run(["bash", "-n", str(script)]).returncode == 0
+    assert script.read_text().startswith("#!/bin/bash\n")
+    assert "$gamepath" not in script.read_text()  # substituted at install time
+
+
+def _launch(doc, tmp_path, size, cwd=None):
+    script = _write_launch_script(doc, tmp_path)
+    env = {k: v for k, v in os.environ.items() if k != "S4_RESOLUTION"}
+    if size is not None:
+        env["S4_RESOLUTION"] = size
+    return subprocess.run(
+        [str(script)], capture_output=True, text=True, env=env, cwd=cwd or tmp_path
+    )
+
+
+@pytest.fixture
+def saved_stock(game):
+    """The state after install: the stock DLL saved as .orig, a patched one in place."""
+    (game / "Exe/GfxEngine.dll.orig").write_bytes(_stock_dll())
+    return game
+
+
+@pytest.mark.parametrize("size", ["2256x1504", "01920x01080", "1x1", "65535x65535"])
+def test_launch_script_patches_the_size_from_the_environment(doc, saved_stock, tmp_path, size):
+    result = _launch(doc, tmp_path, size, cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    width, height = (int(x) for x in size.split("x"))
+    assert _size((saved_stock / "Exe/GfxEngine.dll").read_bytes()) == (width, height)
+    assert not (saved_stock / "Exe/GfxEngine.dll.new").exists()
+
+
+@pytest.mark.parametrize(
+    "size",
+    [None, "", "abc", "1920", "1920x", "x1080", "0x0", "0x600", "800x0", "70000x100", "100x70000",
+     "123456x100", "-5x10", " 1920x1080", "1920x1080 ", "1920x1080; touch pwned", "1920X1080"],
+)  # fmt: skip
+def test_launch_script_ignores_bad_sizes_and_never_fails_the_launch(
+    doc, saved_stock, tmp_path, size
+):
+    before = (saved_stock / "Exe/GfxEngine.dll").read_bytes()
+    result = _launch(doc, tmp_path, size)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "leaving the resolution as it is" in result.stdout
+    assert (saved_stock / "Exe/GfxEngine.dll").read_bytes() == before
+    assert not (tmp_path / "pwned").exists()
+
+
+def test_launch_script_leaves_the_dll_alone_without_a_saved_original(doc, game, tmp_path):
+    before = (game / "Exe/GfxEngine.dll").read_bytes()
+    result = _launch(doc, tmp_path, "1920x1080")
+    assert result.returncode == 0
+    assert "not found" in result.stdout
+    assert (game / "Exe/GfxEngine.dll").read_bytes() == before
+
+
+def test_launch_script_refuses_an_unexpected_original(doc, game, tmp_path):
+    odd = bytearray(_stock_dll())
+    odd[HEIGHT_AT] = 0x55
+    (game / "Exe/GfxEngine.dll.orig").write_bytes(odd)
+    before = (game / "Exe/GfxEngine.dll").read_bytes()
+    result = _launch(doc, tmp_path, "1920x1080")
+    assert result.returncode == 0
+    assert "not the expected stock file" in result.stdout
+    assert (game / "Exe/GfxEngine.dll").read_bytes() == before
+
+
+def test_launch_script_can_change_the_size_again_and_back(doc, saved_stock, tmp_path):
+    dll = saved_stock / "Exe/GfxEngine.dll"
+    for size in ("3840x2160", "1128x752", "3840x2160", "1024x768"):
+        assert _launch(doc, tmp_path, size).returncode == 0
+        assert _size(dll.read_bytes()) == tuple(int(x) for x in size.split("x"))
+    assert dll.read_bytes() == _stock_dll()  # 1024x768 is the stock file again
 
 
 def test_three_by_two_labels_are_really_three_by_two(doc):
